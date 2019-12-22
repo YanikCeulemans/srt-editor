@@ -9,11 +9,26 @@ import Parser exposing (..)
 
 
 type alias Model =
-    String
+    { srtText : String
+    , parsedSrt : Maybe (List SubtitleRecord)
+    , timeshiftForward : Timestamp
+    , timeshiftForwardError : Maybe String
+    }
+
+
+init : Model
+init =
+    { srtText = ""
+    , parsedSrt = Nothing
+    , timeshiftForward = Timestamp 0 0 0 0
+    , timeshiftForwardError = Nothing
+    }
 
 
 type Msg
-    = ChangedText String
+    = ChangedSrtText String
+    | ChangedTimeshiftForward String
+    | ClickedShiftTimeForward
 
 
 type alias Timestamp =
@@ -75,6 +90,20 @@ timespanToString { from, to } =
     timestampToString from ++ " => " ++ timestampToString to
 
 
+addToTimestamp : Timestamp -> Timestamp -> Timestamp
+addToTimestamp timestamp1 timestamp2 =
+    timestampToMilliseconds timestamp1
+        + timestampToMilliseconds timestamp2
+        |> timestampFromMilliseconds
+
+
+shiftTimespanForward : Timestamp -> Timespan -> Timespan
+shiftTimespanForward timeAmount timespan =
+    Timespan
+        (addToTimestamp timeAmount timespan.from)
+        (addToTimestamp timeAmount timespan.to)
+
+
 type alias SubtitleRecord =
     { index : Int
     , timespan : Timespan
@@ -111,16 +140,57 @@ timeStringParser =
         |> andThen maybeIntToParser
 
 
+hourStringParser : Parser Int
+hourStringParser =
+    succeed String.toInt
+        |= (getChompedString <| chompWhile Char.isDigit)
+        |> andThen maybeIntToParser
+
+
+checkLength : Int -> String -> Parser String
+checkLength amount strToCheck =
+    if String.length strToCheck == amount then
+        succeed strToCheck
+
+    else
+        problem <| "Expected a max length of " ++ String.fromInt amount
+
+
+checkMaximum : Int -> Int -> Parser Int
+checkMaximum max intToCheck =
+    if intToCheck <= max then
+        succeed intToCheck
+
+    else
+        problem <| "Expected a maximum number of " ++ String.fromInt max
+
+
+minuteSecondStringParser : Parser Int
+minuteSecondStringParser =
+    succeed String.toInt
+        |= (getChompedString <| chompWhile Char.isDigit)
+        |> andThen maybeIntToParser
+        |> andThen (checkMaximum 59)
+
+
+millisecondParser : Parser Int
+millisecondParser =
+    succeed String.toInt
+        |= (getChompedString <| chompWhile Char.isDigit)
+        |> andThen maybeIntToParser
+        |> andThen (checkMaximum 999)
+
+
 timestampParser : Parser Timestamp
 timestampParser =
     succeed Timestamp
-        |= timeStringParser
+        |= hourStringParser
         |. symbol ":"
-        |= timeStringParser
+        |= minuteSecondStringParser
         |. symbol ":"
-        |= timeStringParser
+        |= minuteSecondStringParser
         |. symbol ","
-        |= timeStringParser
+        |= millisecondParser
 
 
 timespanParser : Parser Timespan
@@ -168,8 +238,59 @@ srtHelp revRecordsSoFar =
 update : Msg -> Model -> Model
 update msg model =
     case msg of
-        ChangedText newText ->
-            newText
+        ChangedSrtText newText ->
+            { model
+                | srtText = newText
+                , parsedSrt =
+                    run srtParser newText
+                        |> Result.toMaybe
+            }
+
+        ChangedTimeshiftForward newTimeshift ->
+            parseAndUpdateTimeshiftForward newTimeshift model
+
+        ClickedShiftTimeForward ->
+            shiftTimeForward model
+
+
+parseAndUpdateTimeshiftForward : String -> Model -> Model
+parseAndUpdateTimeshiftForward newTimeshift model =
+    case run timestampParser newTimeshift of
+        Ok parsedTimeshift ->
+            { model
+                | timeshiftForward = parsedTimeshift
+                , timeshiftForwardError = Nothing
+            }
+
+        Err deadEnds ->
+            { model
+                | timeshiftForwardError =
+                    Just <|
+                        Debug.toString deadEnds
+            }
+
+
+shiftTimeForward : Model -> Model
+shiftTimeForward model =
+    case model.parsedSrt of
+        Just parsedSrt ->
+            { model
+                | parsedSrt =
+                    parsedSrt
+                        |> List.map
+                            (\r ->
+                                { r
+                                    | timespan =
+                                        shiftTimespanForward
+                                            model.timeshiftForward
+                                            r.timespan
+                                }
+                            )
+                        |> Just
+            }
+
+        Nothing ->
+            model
 
 
 viewRecord : SubtitleRecord -> Element msg
@@ -188,73 +309,82 @@ viewRecord { index, timespan, content } =
         ]
 
 
-viewParsedResult : String -> Element msg
-viewParsedResult dataToParse =
-    case run srtParser dataToParse of
-        Ok parsedSrt ->
-            Element.table
-                [ Element.scrollbarY
-                , height <| Element.maximum 400 fill
-                , width fill
-                ]
-                { data = parsedSrt
-                , columns =
-                    [ { header = text "#"
-                      , width = fill
-                      , view = \i -> el [ Element.centerY ] <| text <| String.fromInt i.index
-                      }
-                    , { header = text "from"
-                      , width = fill
-                      , view = \i -> el [ Element.centerY ] <| text <| timestampToString <| i.timespan.from
-                      }
-                    , { header = text "to"
-                      , width = fill
-                      , view = \i -> el [ Element.centerY ] <| text <| timestampToString <| i.timespan.to
-                      }
-                    , { header = text "duration"
-                      , width = fill
-                      , view = \i -> el [ Element.centerY ] <| text <| timestampToString <| duration i.timespan
-                      }
-                    , { header = text "subtitle"
-                      , width = fill
-                      , view = \i -> text <| i.content
-                      }
-                    ]
-                }
+viewParsedResult : List SubtitleRecord -> Element msg
+viewParsedResult parsedSrt =
+    Element.table
+        [ Element.scrollbarY
+        , height <| Element.maximum 400 fill
+        , width fill
+        ]
+        { data = parsedSrt
+        , columns =
+            [ { header = text "#"
+              , width = fill
+              , view = \i -> el [ Element.centerY ] <| text <| String.fromInt i.index
+              }
+            , { header = text "from"
+              , width = fill
+              , view = \i -> el [ Element.centerY ] <| text <| timestampToString <| i.timespan.from
+              }
+            , { header = text "to"
+              , width = fill
+              , view = \i -> el [ Element.centerY ] <| text <| timestampToString <| i.timespan.to
+              }
+            , { header = text "duration"
+              , width = fill
+              , view = \i -> el [ Element.centerY ] <| text <| timestampToString <| duration i.timespan
+              }
+            , { header = text "subtitle"
+              , width = fill
+              , view = \i -> text <| i.content
+              }
+            ]
+        }
 
-        -- List.map viewRecord parsedSrt
-        --     |> column
-        --         [ spacing 10
-        --         , Element.scrollbarY
-        --         , height <| Element.maximum 400 fill
-        --         , width fill
-        --         ]
-        Err deadEnds ->
-            Debug.toString deadEnds
-                |> text
+
+viewTimeshifter : Model -> Element Msg
+viewTimeshifter model =
+    column []
+        [ row [ spacing 10 ]
+            [ Element.Input.text []
+                { onChange = ChangedTimeshiftForward
+                , text = model.timeshiftForward |> timestampToString
+                , placeholder = Nothing
+                , label = Element.Input.labelAbove [] (text "Time shift forward")
+                }
+            , Element.Input.button []
+                { onPress = Just ClickedShiftTimeForward
+                , label = text "Shift forward"
+                }
+            ]
+        , Maybe.map text model.timeshiftForwardError
+            |> Maybe.withDefault Element.none
+        ]
 
 
 view : Model -> Html Msg
 view model =
-    Element.layout [ width fill, height fill ] <|
+    Element.layout [ width fill, height fill, Element.padding 10 ] <|
         column [ width fill, height fill, spacing 20 ]
             [ Element.Input.multiline
                 [ width fill
                 , height <| Element.maximum 400 fill
                 ]
-                { onChange = ChangedText
-                , text = model
+                { onChange = ChangedSrtText
+                , text = model.srtText
                 , placeholder = Nothing
                 , spellcheck = False
                 , label = Element.Input.labelAbove [] (text "Enter SRT")
                 }
-            , viewParsedResult model
+            , Maybe.map viewParsedResult model.parsedSrt
+                |> Maybe.withDefault Element.none
+            , viewTimeshifter model
             ]
 
 
 main =
     sandbox
-        { init = ""
+        { init = init
         , update = update
         , view = view
         }
