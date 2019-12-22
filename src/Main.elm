@@ -192,14 +192,43 @@ viewParsedResult : String -> Element msg
 viewParsedResult dataToParse =
     case run srtParser dataToParse of
         Ok parsedSrt ->
-            List.map viewRecord parsedSrt
-                |> column
-                    [ spacing 10
-                    , Element.scrollbarY
-                    , height <| Element.maximum 400 fill
-                    , width fill
+            Element.table
+                [ Element.scrollbarY
+                , height <| Element.maximum 400 fill
+                , width fill
+                ]
+                { data = parsedSrt
+                , columns =
+                    [ { header = text "#"
+                      , width = fill
+                      , view = \i -> el [ Element.centerY ] <| text <| String.fromInt i.index
+                      }
+                    , { header = text "from"
+                      , width = fill
+                      , view = \i -> el [ Element.centerY ] <| text <| timestampToString <| i.timespan.from
+                      }
+                    , { header = text "to"
+                      , width = fill
+                      , view = \i -> el [ Element.centerY ] <| text <| timestampToString <| i.timespan.to
+                      }
+                    , { header = text "duration"
+                      , width = fill
+                      , view = \i -> el [ Element.centerY ] <| text <| timestampToString <| duration i.timespan
+                      }
+                    , { header = text "subtitle"
+                      , width = fill
+                      , view = \i -> text <| i.content
+                      }
                     ]
+                }
 
+        -- List.map viewRecord parsedSrt
+        --     |> column
+        --         [ spacing 10
+        --         , Element.scrollbarY
+        --         , height <| Element.maximum 400 fill
+        --         , width fill
+        --         ]
         Err deadEnds ->
             Debug.toString deadEnds
                 |> text
