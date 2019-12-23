@@ -3,6 +3,8 @@ module Main exposing (main)
 import Browser exposing (sandbox)
 import Debug
 import Element exposing (Element, column, el, fill, fillPortion, height, row, spacing, text, width, wrappedRow)
+import Element.Background
+import Element.Font
 import Element.Input
 import Html exposing (Html)
 import Parser exposing (..)
@@ -309,29 +311,47 @@ viewRecord { index, timespan, content } =
         ]
 
 
+highlightBgColor =
+    Element.rgba255 50 50 50 0.8
+
+
+highlightColor =
+    Element.rgb255 200 200 200
+
+
 viewParsedResult : List SubtitleRecord -> Element msg
 viewParsedResult parsedSrt =
     Element.table
         [ Element.scrollbarY
         , height <| Element.maximum 400 fill
         , width fill
+        , spacing 10
         ]
         { data = parsedSrt
         , columns =
             [ { header = text "#"
-              , width = fill
-              , view = \i -> el [ Element.centerY ] <| text <| String.fromInt i.index
+              , width = Element.shrink
+              , view =
+                    \i ->
+                        el
+                            [ Element.centerY
+                            , Element.Background.color highlightBgColor
+                            , Element.Font.color highlightColor
+                            ]
+                        <|
+                            text <|
+                                String.fromInt i.index
               }
             , { header = text "from"
-              , width = fill
-              , view = \i -> el [ Element.centerY ] <| text <| timestampToString <| i.timespan.from
+              , width = Element.shrink
+              , view = \i -> el [ Element.centerY, Element.Background.color highlightBgColor, Element.Font.color highlightColor ] <| text <| timestampToString <| i.timespan.from
               }
             , { header = text "to"
-              , width = fill
+              , width = Element.shrink
               , view = \i -> el [ Element.centerY ] <| text <| timestampToString <| i.timespan.to
               }
             , { header = text "duration"
-              , width = fill
+              , width = Element.shrink
               , view = \i -> el [ Element.centerY ] <| text <| timestampToString <| duration i.timespan
               }
             , { header = text "subtitle"
