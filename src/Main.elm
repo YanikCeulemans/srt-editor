@@ -28,11 +28,31 @@ type Model
     | EditMode EditmodeModel
 
 
+data =
+    """1
+00:02:42,941 --> 00:02:46,144
+<i>Volwassen Toni: Rockport, Maine, is</i>
+<i> het enige thuis dat ik ooit heb gekend. </i>
+
+2
+00:02:46,144 --> 00:02:49,347
+<i>Ik zal nooit die lente</i>
+<i>van 1962 vergeten.</i>
+
+3
+00:02:49,347 --> 00:02:52,550
+<i> het grote avontuur van mijn familie </i>
+<i>ging net beginnen.</i>
+
+"""
+
+
 init : Model
 init =
-    InputMode
-        { srtText = ""
-        , parseError = Nothing
+    EditMode
+        { parsedSrt = Parser.run srtParser data |> Result.withDefault []
+        , timeshiftForward = Timestamp 0 0 0 0
+        , timeshiftForwardError = Nothing
         }
 
 
@@ -41,6 +61,7 @@ type Msg
     | ChangedTimeshiftForward String
     | ClickedParseSrt String
     | ClickedShiftTimeForward
+    | ClickedRemoveNewlines
 
 
 type alias Timestamp =
@@ -248,6 +269,26 @@ srtHelp revRecordsSoFar =
         ]
 
 
+srtToString : List SubtitleRecord -> String
+srtToString records =
+    List.map srtToStringHelp records
+        |> String.join "\n\n"
+
+
+srtToStringHelp : SubtitleRecord -> String
+srtToStringHelp record =
+    [ record.index |> String.fromInt
+    , record.timespan |> timespanToSrtString
+    , record.content
+    ]
+        |> String.join "\n"
+
+
+timespanToSrtString : Timespan -> String
+timespanToSrtString { from, to } =
+    timestampToString from ++ " --> " ++ timestampToString to
+
+
 update : Msg -> Model -> Model
 update msg model =
     case ( msg, model ) of
@@ -265,6 +306,9 @@ update msg model =
 
         ( ClickedParseSrt srtText, InputMode _ ) ->
             parseSrt srtText
+
+        ( ClickedRemoveNewlines, EditMode editModeModel ) ->
+            removeSrtNewlines editModeModel
 
         _ ->
             model
@@ -317,7 +361,7 @@ shiftTimeForward editModeModel =
 
 parseSrt : String -> Model
 parseSrt srtText =
-    case Debug.log "result" <| Parser.run srtParser srtText of
+    case Parser.run srtParser srtText of
         Ok parsedSrt ->
             EditMode
                 { parsedSrt = parsedSrt
@@ -330,6 +374,26 @@ parseSrt srtText =
                 { srtText = srtText
                 , parseError = deadEnds |> Debug.toString |> Just
                 }
+
+
+removeSrtNewlines : EditmodeModel -> Model
+removeSrtNewlines editModeModel =
+    { editModeModel
+        | parsedSrt = removeNewlines editModeModel.parsedSrt
+    }
+        |> EditMode
+
+
+removeNewlines : List SubtitleRecord -> List SubtitleRecord
+removeNewlines records =
+    List.map removeNewlinesHelp records
+
+
+removeNewlinesHelp : SubtitleRecord -> SubtitleRecord
+removeNewlinesHelp record =
+    { record
+        | content = String.replace "\n" "" record.content
+    }
 
 
 viewRecord : SubtitleRecord -> Element msg
@@ -427,6 +491,9 @@ inputModeView inputModeModel =
             { label = text "Parse SRT"
             , onPress = Just <| ClickedParseSrt inputModeModel.srtText
             }
+        , inputModeModel.parseError
+            |> Maybe.map text
+            |> Maybe.withDefault Element.none
         ]
 
 
@@ -435,7 +502,18 @@ editModeView editModeModel =
     column [ width fill, height fill, spacing 20 ]
         [ parsedSrtView editModeModel.parsedSrt
         , timeshifterView editModeModel
+        , Element.Input.button []
+            { label = text "Remove new lines"
+            , onPress = Just ClickedRemoveNewlines
+            }
+        , outputView editModeModel
         ]
+
+
+outputView : EditmodeModel -> Element Msg
+outputView editModeModel =
+    column [ width fill, height fill, spacing 20 ]
+        [ text <| srtToString editModeModel.parsedSrt ]
 
 
 view : Model -> Html Msg
