@@ -2,7 +2,7 @@ module Main exposing (main)
 
 import Browser exposing (sandbox)
 import Debug
-import Element exposing (Element, column, el, fill, fillPortion, height, row, spacing, text, width, wrappedRow)
+import Element exposing (Element, column, el, fill, height, row, shrink, spacing, text, width, wrappedRow)
 import Element.Background
 import Element.Font
 import Element.Input
@@ -10,26 +10,36 @@ import Html exposing (Html)
 import Parser exposing (..)
 
 
-type alias Model =
+type alias InputmodeModel =
     { srtText : String
-    , parsedSrt : Maybe (List SubtitleRecord)
+    , parseError : Maybe String
+    }
+
+
+type alias EditmodeModel =
+    { parsedSrt : List SubtitleRecord
     , timeshiftForward : Timestamp
     , timeshiftForwardError : Maybe String
     }
 
 
+type Model
+    = InputMode InputmodeModel
+    | EditMode EditmodeModel
+
+
 init : Model
 init =
-    { srtText = ""
-    , parsedSrt = Nothing
-    , timeshiftForward = Timestamp 0 0 0 0
-    , timeshiftForwardError = Nothing
-    }
+    InputMode
+        { srtText = ""
+        , parseError = Nothing
+        }
 
 
 type Msg
-    = ChangedSrtText String
+    = ChangedInputText String
     | ChangedTimeshiftForward String
+    | ClickedParseSrt String
     | ClickedShiftTimeForward
 
 
@@ -233,66 +243,93 @@ srtHelp revRecordsSoFar =
             |= subtitleRecordParser
             |. oneOf [ symbol "\n\n", end ]
         , succeed ()
+            |. end
             |> map (\_ -> Done (List.reverse revRecordsSoFar))
         ]
 
 
 update : Msg -> Model -> Model
 update msg model =
-    case msg of
-        ChangedSrtText newText ->
-            { model
+    case ( msg, model ) of
+        ( ChangedInputText newText, InputMode inputModeModel ) ->
+            { inputModeModel
                 | srtText = newText
-                , parsedSrt =
-                    run srtParser newText
-                        |> Result.toMaybe
             }
+                |> InputMode
 
-        ChangedTimeshiftForward newTimeshift ->
-            parseAndUpdateTimeshiftForward newTimeshift model
+        ( ChangedTimeshiftForward newTimeshift, EditMode editModeModel ) ->
+            parseAndUpdateTimeshiftForward newTimeshift editModeModel
 
-        ClickedShiftTimeForward ->
-            shiftTimeForward model
+        ( ClickedShiftTimeForward, EditMode editModeModel ) ->
+            shiftTimeForward editModeModel
+
+        ( ClickedParseSrt srtText, InputMode _ ) ->
+            parseSrt srtText
+
+        _ ->
+            model
 
 
-parseAndUpdateTimeshiftForward : String -> Model -> Model
-parseAndUpdateTimeshiftForward newTimeshift model =
+changeInputText : String -> InputmodeModel -> Model
+changeInputText newText inputModeModel =
+    { inputModeModel
+        | srtText = newText
+    }
+        |> InputMode
+
+
+parseAndUpdateTimeshiftForward : String -> EditmodeModel -> Model
+parseAndUpdateTimeshiftForward newTimeshift editModeModel =
     case run timestampParser newTimeshift of
         Ok parsedTimeshift ->
-            { model
+            { editModeModel
                 | timeshiftForward = parsedTimeshift
                 , timeshiftForwardError = Nothing
             }
+                |> EditMode
 
         Err deadEnds ->
-            { model
+            { editModeModel
                 | timeshiftForwardError =
                     Just <|
                         Debug.toString deadEnds
             }
+                |> EditMode
 
 
-shiftTimeForward : Model -> Model
-shiftTimeForward model =
-    case model.parsedSrt of
-        Just parsedSrt ->
-            { model
-                | parsedSrt =
-                    parsedSrt
-                        |> List.map
-                            (\r ->
-                                { r
-                                    | timespan =
-                                        shiftTimespanForward
-                                            model.timeshiftForward
-                                            r.timespan
-                                }
-                            )
-                        |> Just
-            }
+shiftTimeForward : EditmodeModel -> Model
+shiftTimeForward editModeModel =
+    { editModeModel
+        | parsedSrt =
+            editModeModel.parsedSrt
+                |> List.map
+                    (\r ->
+                        { r
+                            | timespan =
+                                shiftTimespanForward
+                                    editModeModel.timeshiftForward
+                                    r.timespan
+                        }
+                    )
+    }
+        |> EditMode
 
-        Nothing ->
-            model
+
+parseSrt : String -> Model
+parseSrt srtText =
+    case Debug.log "result" <| Parser.run srtParser srtText of
+        Ok parsedSrt ->
+            EditMode
+                { parsedSrt = parsedSrt
+                , timeshiftForward = Timestamp 0 0 0 0
+                , timeshiftForwardError = Nothing
+                }
+
+        Err deadEnds ->
+            InputMode
+                { srtText = srtText
+                , parseError = deadEnds |> Debug.toString |> Just
+                }
 
 
 viewRecord : SubtitleRecord -> Element msg
@@ -319,8 +356,8 @@ highlightColor =
     Element.rgb255 200 200 200
 
 
-viewParsedResult : List SubtitleRecord -> Element msg
-viewParsedResult parsedSrt =
+parsedSrtView : List SubtitleRecord -> Element msg
+parsedSrtView parsedSrt =
     Element.table
         [ Element.scrollbarY
         , height <| Element.maximum 400 fill
@@ -331,20 +368,11 @@ viewParsedResult parsedSrt =
         , columns =
             [ { header = text "#"
               , width = Element.shrink
-              , view =
-                    \i ->
-                        el
-                            [ Element.centerY
-                            , Element.Background.color highlightBgColor
-                            , Element.Font.color highlightColor
-                            ]
-                        <|
-                            text <|
-                                String.fromInt i.index
+              , view = \i -> el [ Element.centerY ] <| text <| String.fromInt i.index
               }
             , { header = text "from"
               , width = Element.shrink
-              , view = \i -> el [ Element.centerY, Element.Background.color highlightBgColor, Element.Font.color highlightColor ] <| text <| timestampToString <| i.timespan.from
+              , view = \i -> el [ Element.centerY ] <| text <| timestampToString <| i.timespan.from
               }
             , { header = text "to"
               , width = Element.shrink
@@ -362,13 +390,13 @@ viewParsedResult parsedSrt =
         }
 
 
-viewTimeshifter : Model -> Element Msg
-viewTimeshifter model =
+timeshifterView : EditmodeModel -> Element Msg
+timeshifterView editModeModel =
     column []
         [ row [ spacing 10 ]
             [ Element.Input.text []
                 { onChange = ChangedTimeshiftForward
-                , text = model.timeshiftForward |> timestampToString
+                , text = editModeModel.timeshiftForward |> timestampToString
                 , placeholder = Nothing
                 , label = Element.Input.labelAbove [] (text "Time shift forward")
                 }
@@ -377,29 +405,48 @@ viewTimeshifter model =
                 , label = text "Shift forward"
                 }
             ]
-        , Maybe.map text model.timeshiftForwardError
+        , Maybe.map text editModeModel.timeshiftForwardError
             |> Maybe.withDefault Element.none
+        ]
+
+
+inputModeView : InputmodeModel -> Element Msg
+inputModeView inputModeModel =
+    column [ width fill, height fill, spacing 20 ]
+        [ Element.Input.multiline
+            [ width fill
+            , height <| Element.maximum 400 fill
+            ]
+            { onChange = ChangedInputText
+            , text = inputModeModel.srtText
+            , placeholder = Nothing
+            , spellcheck = False
+            , label = Element.Input.labelAbove [] (text "Enter SRT")
+            }
+        , Element.Input.button []
+            { label = text "Parse SRT"
+            , onPress = Just <| ClickedParseSrt inputModeModel.srtText
+            }
+        ]
+
+
+editModeView : EditmodeModel -> Element Msg
+editModeView editModeModel =
+    column [ width fill, height fill, spacing 20 ]
+        [ parsedSrtView editModeModel.parsedSrt
+        , timeshifterView editModeModel
         ]
 
 
 view : Model -> Html Msg
 view model =
     Element.layout [ width fill, height fill, Element.padding 10 ] <|
-        column [ width fill, height fill, spacing 20 ]
-            [ Element.Input.multiline
-                [ width fill
-                , height <| Element.maximum 400 fill
-                ]
-                { onChange = ChangedSrtText
-                , text = model.srtText
-                , placeholder = Nothing
-                , spellcheck = False
-                , label = Element.Input.labelAbove [] (text "Enter SRT")
-                }
-            , Maybe.map viewParsedResult model.parsedSrt
-                |> Maybe.withDefault Element.none
-            , viewTimeshifter model
-            ]
+        case model of
+            InputMode inputModeModel ->
+                inputModeView inputModeModel
+
+            EditMode editmodeModel ->
+                editModeView editmodeModel
 
 
 main =
