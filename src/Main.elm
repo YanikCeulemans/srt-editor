@@ -3,6 +3,7 @@ module Main exposing (main)
 import Browser exposing (sandbox)
 import Debug
 import Element exposing (Element, column, el, fill, height, row, shrink, spacing, text, width)
+import Element.Font
 import Element.Input
 import Html exposing (Html)
 import Srt exposing (Srt, srtFromString, srtToString, timestampToString)
@@ -45,9 +46,17 @@ data =
 
 init : Model
 init =
-    EditMode
-        { parsedSrt = srtFromString data |> Result.withDefault Srt.empty
-        }
+    case srtFromString data |> Result.mapError (Debug.log "err") of
+        Ok parsedSrt ->
+            EditMode
+                { parsedSrt = Debug.log "parsedSrt" parsedSrt
+                }
+
+        Err e ->
+            InputMode
+                { srtText = data
+                , parseError = Just e
+                }
 
 
 type Msg
@@ -91,10 +100,10 @@ parseSrt srtText =
                 { parsedSrt = parsedSrt
                 }
 
-        Err deadEnds ->
+        Err e ->
             InputMode
                 { srtText = srtText
-                , parseError = deadEnds |> Debug.toString |> Just
+                , parseError = Just e
                 }
 
 
@@ -142,7 +151,7 @@ parsedSrtView parsedSrt =
               }
             , { header = text "subtitle"
               , width = fill
-              , view = \i -> text <| i.content
+              , view = \i -> text <| Srt.srtContentToString i.content
               }
             ]
         }
@@ -166,7 +175,7 @@ inputModeView inputModeModel =
             , onPress = Just <| ClickedParseSrt inputModeModel.srtText
             }
         , inputModeModel.parseError
-            |> Maybe.map text
+            |> Maybe.map (text >> el [ Element.Font.family [ Element.Font.monospace ] ])
             |> Maybe.withDefault Element.none
         ]
 

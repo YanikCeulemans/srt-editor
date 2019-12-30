@@ -6,18 +6,22 @@ module Srt exposing
     , duration
     , empty
     , removeNewlines
+    , srtContentToString
     , srtFromString
     , srtRecords
     , srtToString
     , timestampToString
     )
 
+import Array
 import Debug
 import Parser
     exposing
         ( (|.)
         , (|=)
         , Parser
+        , chompIf
+        , chompUntil
         , chompUntilEndOr
         , chompWhile
         , end
@@ -36,6 +40,14 @@ type Srt
 type alias SubtitleRecord =
     { index : Int
     , timespan : Timespan
+    , content : List DecoratedText
+    }
+
+
+type alias DecoratedText =
+    { bold : Bool
+    , italic : Bool
+    , underlined : Bool
     , content : String
     }
 
@@ -205,10 +217,57 @@ timespanParser =
         |= timestampParser
 
 
-subtitleTextParser : Parser String
+subtitleTextParser : Parser (List DecoratedText)
 subtitleTextParser =
-    chompUntilEndOr "\n\n"
-        |> getChompedString
+    Parser.loop [] subtitleTextParserHelp
+
+
+subtitleTextParserHelp : List DecoratedText -> Parser (Parser.Step (List DecoratedText) (List DecoratedText))
+subtitleTextParserHelp decoratedTextSoFar =
+    oneOf
+        [ succeed (\dt -> Parser.Loop (dt :: decoratedTextSoFar))
+            |= decoratedTextParser
+            |. symbol "\n"
+        , succeed (\_ -> Parser.Done (List.reverse decoratedTextSoFar))
+            |= oneOf [ symbol "\n", end ]
+        ]
+
+
+processTag : String -> String -> DecoratedText
+processTag tag content =
+    { bold = False, italic = True, underlined = False, content = content }
+
+
+decoratedTextParser : Parser DecoratedText
+decoratedTextParser =
+    succeed processTag
+        |= tagParser
+        |= (chompUntil "<" |> getChompedString |> Parser.map String.trim)
+        |. tagParser
+
+
+tagParser : Parser String
+tagParser =
+    succeed identity
+        |. chompIf (\c -> c == '<')
+        |. oneOf [ chompIf (\c -> c == '/'), succeed () ]
+        |= (Parser.chompUntil ">" |> getChompedString)
+        |. symbol ">"
+
+
+
+-- oneOf
+--     [ boldParser
+--     , italicParser
+--     , underlinedParser
+--     ]
+
+
+boldParser : Parser DecoratedText
+boldParser =
+    succeed (\s -> { bold = True, italic = False, underlined = False, content = s })
+        |. symbol "<b>"
+        |= (chompUntilEndOr "</b>" |> getChompedString)
 
 
 subtitleRecordParser : Parser SubtitleRecord
@@ -231,7 +290,8 @@ srtHelp revRecordsSoFar =
     oneOf
         [ succeed (\r -> Parser.Loop (r :: revRecordsSoFar))
             |= subtitleRecordParser
-            |. oneOf [ symbol "\n\n", end ]
+
+        -- |. oneOf [ symbol "\n\n", end ]
         , succeed ()
             |. end
             |> Parser.map (\_ -> Parser.Done (Srt (List.reverse revRecordsSoFar)))
@@ -256,15 +316,65 @@ removeNewlines (Srt records) =
 
 removeNewlinesHelp : SubtitleRecord -> SubtitleRecord
 removeNewlinesHelp record =
-    { record
-        | content = String.replace "\n" "" record.content
-    }
+    record
+
+
+
+-- { record
+--     | content = String.replace "\n" "" record.content
+-- }
 
 
 srtFromString : String -> Result String Srt
 srtFromString input =
     Parser.run srtParser input
-        |> Result.mapError (Debug.toString >> (++) "TODO MAP ERROR: ")
+        |> Result.mapError (formatError input)
+
+
+formatError : String -> List Parser.DeadEnd -> String
+formatError src deadEnds =
+    "Oops, it looks like I encountered a few errors:\n\n"
+        ++ String.concat (List.map (formatErrorHelp src) deadEnds)
+
+
+listAppendPiped : List a -> List a -> List a
+listAppendPiped a b =
+    List.append b a
+
+
+formatErrorHelp : String -> Parser.DeadEnd -> String
+formatErrorHelp src deadEnd =
+    let
+        srcStr =
+            String.split "\n" src
+                |> Array.fromList
+                |> Array.get (deadEnd.row - 1)
+                |> Maybe.withDefault "THIS SHOULD NEVER HAPPEN"
+
+        problemStr =
+            Debug.toString deadEnd.problem ++ "\n"
+    in
+    [ problemStr ++ String.repeat (String.length problemStr) "-"
+    , srcStr
+    , String.repeat (deadEnd.col - 1) " " ++ "^"
+    , Debug.toString deadEnd
+    , String.toList srcStr
+        |> List.indexedMap
+            (\i c ->
+                if modBy 10 i == 0 then
+                    String.fromInt i
+                        |> String.toList
+                        |> listAppendPiped [ c ]
+
+                else
+                    [ c ]
+            )
+        |> List.concat
+        |> String.fromList
+    ]
+        |> List.intersperse "\n"
+        |> listAppendPiped [ "\n\n" ]
+        |> String.concat
 
 
 srtToString : Srt -> String
@@ -277,7 +387,7 @@ srtToStringHelp : SubtitleRecord -> String
 srtToStringHelp record =
     [ record.index |> String.fromInt
     , record.timespan |> timespanToSrtString
-    , record.content
+    , record.content |> srtContentToString
     ]
         |> String.join "\n"
 
@@ -285,3 +395,25 @@ srtToStringHelp record =
 timespanToSrtString : Timespan -> String
 timespanToSrtString { from, to } =
     timestampToString from ++ " --> " ++ timestampToString to
+
+
+decoratedTextToString : DecoratedText -> String
+decoratedTextToString { bold, italic, underlined, content } =
+    let
+        wrapWithTag shouldWrap tag toWrap =
+            if shouldWrap then
+                "<" ++ tag ++ ">" ++ toWrap ++ "</" ++ tag ++ ">"
+
+            else
+                toWrap
+    in
+    wrapWithTag bold "b" content
+        |> wrapWithTag italic "i"
+        |> wrapWithTag underlined "u"
+
+
+srtContentToString : List DecoratedText -> String
+srtContentToString =
+    List.map decoratedTextToString
+        >> List.intersperse "\n"
+        >> String.concat
