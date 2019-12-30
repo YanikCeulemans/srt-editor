@@ -10,6 +10,7 @@ module Srt exposing
     , srtFromString
     , srtRecords
     , srtToString
+    , testDecoration
     , timestampToString
     )
 
@@ -50,6 +51,82 @@ type alias DecoratedText =
     , underlined : Bool
     , content : String
     }
+
+
+type alias Decoration =
+    { bold : Bool
+    , italic : Bool
+    , underlined : Bool
+    }
+
+
+bold : Decoration
+bold =
+    { bold = True, italic = False, underlined = False }
+
+
+italic : Decoration
+italic =
+    { bold = False, italic = True, underlined = False }
+
+
+underlined : Decoration
+underlined =
+    { bold = False, italic = False, underlined = True }
+
+
+type DecoratedNode
+    = PlainText String
+    | Newline
+    | DecoratedNode Decoration (List DecoratedNode)
+
+
+myDecoration : List DecoratedNode
+myDecoration =
+    [ PlainText "This is plain text"
+    , Newline
+    , DecoratedNode bold [ PlainText "This is ", DecoratedNode italic [ PlainText "bold" ], PlainText " text." ]
+    , Newline
+    , PlainText "Plain text as "
+    , DecoratedNode bold [ PlainText "root" ]
+    , PlainText " node is also possible"
+    ]
+
+
+wrapWithTag : Bool -> String -> String -> String
+wrapWithTag shouldWrap tag toWrap =
+    if shouldWrap then
+        "<" ++ tag ++ ">" ++ toWrap ++ "</" ++ tag ++ ">"
+
+    else
+        toWrap
+
+
+decoratedNodesToString : List DecoratedNode -> String
+decoratedNodesToString nodes =
+    List.map decoratedNodeToString nodes
+        |> String.concat
+
+
+decoratedNodeToString : DecoratedNode -> String
+decoratedNodeToString decoratedNode =
+    case decoratedNode of
+        Newline ->
+            "\n"
+
+        PlainText str ->
+            str
+
+        DecoratedNode decoration nodes ->
+            List.map decoratedNodeToString nodes
+                |> String.concat
+                |> wrapWithTag decoration.bold "b"
+                |> wrapWithTag decoration.italic "i"
+                |> wrapWithTag decoration.underlined "u"
+
+
+testDecoration =
+    decoratedNodesToString myDecoration
 
 
 type alias Timespan =
@@ -398,18 +475,10 @@ timespanToSrtString { from, to } =
 
 
 decoratedTextToString : DecoratedText -> String
-decoratedTextToString { bold, italic, underlined, content } =
-    let
-        wrapWithTag shouldWrap tag toWrap =
-            if shouldWrap then
-                "<" ++ tag ++ ">" ++ toWrap ++ "</" ++ tag ++ ">"
-
-            else
-                toWrap
-    in
-    wrapWithTag bold "b" content
-        |> wrapWithTag italic "i"
-        |> wrapWithTag underlined "u"
+decoratedTextToString ({ content } as decoration) =
+    wrapWithTag decoration.bold "b" content
+        |> wrapWithTag decoration.italic "i"
+        |> wrapWithTag decoration.underlined "u"
 
 
 srtContentToString : List DecoratedText -> String

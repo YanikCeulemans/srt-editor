@@ -189,6 +189,7 @@ editModeView editModeModel =
             , onPress = Just ClickedRemoveNewlines
             }
         , outputView editModeModel
+        , el [] <| text Srt.testDecoration
         ]
 
 
