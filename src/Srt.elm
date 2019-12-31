@@ -10,7 +10,6 @@ module Srt exposing
     , srtFromString
     , srtRecords
     , srtToString
-    , testDecoration
     , timestampToString
     , trimNodes
     )
@@ -74,18 +73,6 @@ type DecoratedNode
     | DecoratedNode Decoration (List DecoratedNode)
 
 
-myDecoration : List DecoratedNode
-myDecoration =
-    [ PlainText "This is plain text"
-    , Newline
-    , DecoratedNode bold [ PlainText "This is ", DecoratedNode italic [ PlainText "bold" ], PlainText " text." ]
-    , Newline
-    , PlainText "Plain text as "
-    , DecoratedNode bold [ PlainText "root" ]
-    , PlainText " node is also possible"
-    ]
-
-
 wrapWithTag : Bool -> String -> String -> String
 wrapWithTag shouldWrap tag toWrap =
     if shouldWrap then
@@ -116,11 +103,6 @@ decoratedNodeToString decoratedNode =
                 |> wrapWithTag decoration.bold "b"
                 |> wrapWithTag decoration.italic "i"
                 |> wrapWithTag decoration.underlined "u"
-
-
-testDecoration : String
-testDecoration =
-    decoratedNodesToString myDecoration
 
 
 type alias Timespan =

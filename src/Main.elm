@@ -220,7 +220,6 @@ editModeView editModeModel =
             , onPress = Just ClickedTrimNodes
             }
         , outputView editModeModel
-        , el [] <| text Srt.testDecoration
         ]
 
 
