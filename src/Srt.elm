@@ -12,6 +12,7 @@ module Srt exposing
     , srtToString
     , testDecoration
     , timestampToString
+    , trimNodes
     )
 
 import Array
@@ -117,6 +118,7 @@ decoratedNodeToString decoratedNode =
                 |> wrapWithTag decoration.underlined "u"
 
 
+testDecoration : String
 testDecoration =
     decoratedNodesToString myDecoration
 
@@ -310,6 +312,8 @@ decorationParser =
                         |= Parser.lazy (\_ -> decorationParser)
                         |. symbol (closingTag tag)
                 )
+        , succeed Newline
+            |. symbol "\n"
         , succeed PlainText
             |= (oneOf [ chompUntil "<", chompUntil "\n", end ] |> getChompedString)
         ]
@@ -320,8 +324,6 @@ contentParserHelp lst =
     oneOf
         [ succeed (Parser.Done (List.reverse lst))
             |. symbol "\n\n"
-        , succeed (Parser.Loop (Newline :: lst))
-            |. symbol "\n"
         , succeed (\d -> Parser.Loop (d :: lst))
             |= decorationParser
         ]
@@ -376,13 +378,28 @@ removeNewlines (Srt records) =
 
 removeNewlinesHelp : SubtitleRecord -> SubtitleRecord
 removeNewlinesHelp record =
-    record
+    { record | content = List.filter (\n -> n /= Newline) record.content }
 
 
+trimNodeText : DecoratedNode -> DecoratedNode
+trimNodeText decoratedNode =
+    case decoratedNode of
+        DecoratedNode d [ PlainText t ] ->
+            DecoratedNode d << List.singleton << PlainText <| String.trim t
 
--- { record
---     | content = String.replace "\n" "" record.content
--- }
+        _ ->
+            decoratedNode
+
+
+trimNodesHelp : SubtitleRecord -> SubtitleRecord
+trimNodesHelp record =
+    { record | content = List.map trimNodeText record.content }
+
+
+trimNodes : Srt -> Srt
+trimNodes (Srt records) =
+    List.map trimNodesHelp records
+        |> Srt
 
 
 srtFromString : String -> Result String Srt

@@ -3,6 +3,7 @@ module Main exposing (main)
 import Browser exposing (sandbox)
 import Debug
 import Element exposing (Element, column, el, fill, height, row, shrink, spacing, text, width)
+import Element.Border
 import Element.Font
 import Element.Input
 import Html exposing (Html)
@@ -63,6 +64,7 @@ type Msg
     = ChangedInputText String
     | ClickedParseSrt String
     | ClickedRemoveNewlines
+    | ClickedTrimNodes
 
 
 update : Msg -> Model -> Model
@@ -79,6 +81,9 @@ update msg model =
 
         ( ClickedRemoveNewlines, EditMode editModeModel ) ->
             removeSrtNewlines editModeModel
+
+        ( ClickedTrimNodes, EditMode editModeModel ) ->
+            trimSrtNodes editModeModel
 
         _ ->
             model
@@ -111,6 +116,14 @@ removeSrtNewlines : EditmodeModel -> Model
 removeSrtNewlines editModeModel =
     { editModeModel
         | parsedSrt = Srt.removeNewlines editModeModel.parsedSrt
+    }
+        |> EditMode
+
+
+trimSrtNodes : EditmodeModel -> Model
+trimSrtNodes editModeModel =
+    { editModeModel
+        | parsedSrt = Srt.trimNodes editModeModel.parsedSrt
     }
         |> EditMode
 
@@ -157,6 +170,20 @@ parsedSrtView parsedSrt =
         }
 
 
+roundedBorderButton : List (Element.Attribute msg) -> { onPress : Maybe msg, label : Element msg } -> Element msg
+roundedBorderButton attrs =
+    Element.Input.button
+        ([ Element.Border.color <|
+            Element.rgb255 50 50 50
+         , Element.Border.solid
+         , Element.Border.width 1
+         , Element.Border.rounded 5
+         , Element.paddingXY 10 7
+         ]
+            ++ attrs
+        )
+
+
 inputModeView : InputmodeModel -> Element Msg
 inputModeView inputModeModel =
     column [ width fill, height fill, spacing 20 ]
@@ -170,7 +197,7 @@ inputModeView inputModeModel =
             , spellcheck = False
             , label = Element.Input.labelAbove [] (text "Enter SRT")
             }
-        , Element.Input.button []
+        , roundedBorderButton []
             { label = text "Parse SRT"
             , onPress = Just <| ClickedParseSrt inputModeModel.srtText
             }
@@ -184,9 +211,13 @@ editModeView : EditmodeModel -> Element Msg
 editModeView editModeModel =
     column [ width fill, height fill, spacing 20 ]
         [ parsedSrtView editModeModel.parsedSrt
-        , Element.Input.button []
+        , roundedBorderButton []
             { label = text "Remove new lines"
             , onPress = Just ClickedRemoveNewlines
+            }
+        , roundedBorderButton []
+            { label = text "Trim nodes"
+            , onPress = Just ClickedTrimNodes
             }
         , outputView editModeModel
         , el [] <| text Srt.testDecoration
