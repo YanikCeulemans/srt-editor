@@ -11,6 +11,7 @@ module Srt exposing
     , srtRecords
     , srtToString
     , timestampToString
+    , transcript
     , trimNodes
     )
 
@@ -382,6 +383,32 @@ trimNodes : Srt -> Srt
 trimNodes (Srt records) =
     List.map trimNodesHelp records
         |> Srt
+
+
+transcriptFromNode : DecoratedNode -> String
+transcriptFromNode decoratedNode =
+    case decoratedNode of
+        PlainText pt ->
+            pt
+
+        Newline ->
+            " "
+
+        DecoratedNode _ innerNodes ->
+            List.map transcriptFromNode innerNodes
+                |> String.concat
+
+
+transcriptHelp : SubtitleRecord -> String
+transcriptHelp { content } =
+    List.map transcriptFromNode content
+        |> String.concat
+
+
+transcript : Srt -> String
+transcript (Srt records) =
+    List.map transcriptHelp records
+        |> String.concat
 
 
 srtFromString : String -> Result String Srt

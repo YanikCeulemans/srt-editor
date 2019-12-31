@@ -47,17 +47,21 @@ ging <b><i>net</i></b> beginnen.
 
 init : Model
 init =
-    case srtFromString data of
-        Ok parsedSrt ->
-            EditMode
-                { parsedSrt = Debug.log "parsedSrt" parsedSrt
-                }
+    InputMode { srtText = "", parseError = Nothing }
 
-        Err e ->
-            InputMode
-                { srtText = data
-                , parseError = Just e
-                }
+
+
+-- init =
+--     case srtFromString data of
+--         Ok parsedSrt ->
+--             EditMode
+--                 { parsedSrt = Debug.log "parsedSrt" parsedSrt
+--                 }
+--         Err e ->
+--             InputMode
+--                 { srtText = data
+--                 , parseError = Just e
+--                 }
 
 
 type Msg
@@ -219,13 +223,19 @@ editModeView editModeModel =
             { label = text "Trim nodes"
             , onPress = Just ClickedTrimNodes
             }
-        , outputView editModeModel
+        , row [ width fill, height <| Element.maximum 400 fill ]
+            [ outputView editModeModel
+            , Srt.transcript editModeModel.parsedSrt
+                |> text
+                >> List.singleton
+                >> Element.paragraph [ Element.Font.alignLeft, width fill ]
+            ]
         ]
 
 
 outputView : EditmodeModel -> Element Msg
 outputView editModeModel =
-    column [ width fill, height fill, spacing 20 ]
+    column [ height fill, spacing 20 ]
         [ text <| srtToString editModeModel.parsedSrt ]
 
 
