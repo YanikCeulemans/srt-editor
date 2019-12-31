@@ -39,14 +39,14 @@ data =
 3
 00:02:49,347 --> 00:02:52,550
 <i> het grote avontuur van mijn familie </i>
-<i>ging net beginnen.</i>
+ging <b><i>net</i></b> beginnen.
 
 """
 
 
 init : Model
 init =
-    case srtFromString data |> Result.mapError (Debug.log "err") of
+    case srtFromString data of
         Ok parsedSrt ->
             EditMode
                 { parsedSrt = Debug.log "parsedSrt" parsedSrt

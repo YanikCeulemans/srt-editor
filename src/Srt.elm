@@ -41,15 +41,7 @@ type Srt
 type alias SubtitleRecord =
     { index : Int
     , timespan : Timespan
-    , content : List DecoratedText
-    }
-
-
-type alias DecoratedText =
-    { bold : Bool
-    , italic : Bool
-    , underlined : Bool
-    , content : String
+    , content : List DecoratedNode
     }
 
 
@@ -224,27 +216,11 @@ maybeIntToParser maybeInt =
             problem "Expected an integer"
 
 
-timeStringParser : Parser Int
-timeStringParser =
-    succeed String.toInt
-        |= (getChompedString <| chompWhile Char.isDigit)
-        |> Parser.andThen maybeIntToParser
-
-
 hourStringParser : Parser Int
 hourStringParser =
     succeed String.toInt
         |= (getChompedString <| chompWhile Char.isDigit)
         |> Parser.andThen maybeIntToParser
-
-
-checkLength : Int -> String -> Parser String
-checkLength amount strToCheck =
-    if String.length strToCheck == amount then
-        succeed strToCheck
-
-    else
-        problem <| "Expected a max length of " ++ String.fromInt amount
 
 
 checkMaximum : Int -> Int -> Parser Int
@@ -294,33 +270,9 @@ timespanParser =
         |= timestampParser
 
 
-subtitleTextParser : Parser (List DecoratedText)
-subtitleTextParser =
-    Parser.loop [] subtitleTextParserHelp
-
-
-subtitleTextParserHelp : List DecoratedText -> Parser (Parser.Step (List DecoratedText) (List DecoratedText))
-subtitleTextParserHelp decoratedTextSoFar =
-    oneOf
-        [ succeed (\dt -> Parser.Loop (dt :: decoratedTextSoFar))
-            |= decoratedTextParser
-            |. symbol "\n"
-        , succeed (\_ -> Parser.Done (List.reverse decoratedTextSoFar))
-            |= oneOf [ symbol "\n", end ]
-        ]
-
-
-processTag : String -> String -> DecoratedText
-processTag tag content =
-    { bold = False, italic = True, underlined = False, content = content }
-
-
-decoratedTextParser : Parser DecoratedText
-decoratedTextParser =
-    succeed processTag
-        |= tagParser
-        |= (chompUntil "<" |> getChompedString |> Parser.map String.trim)
-        |. tagParser
+closingTag : String -> String
+closingTag tag =
+    "</" ++ tag ++ ">"
 
 
 tagParser : Parser String
@@ -332,19 +284,52 @@ tagParser =
         |. symbol ">"
 
 
+processNode : String -> DecoratedNode -> DecoratedNode
+processNode nodeName decoratedNode =
+    case nodeName of
+        "i" ->
+            DecoratedNode italic [ decoratedNode ]
 
--- oneOf
---     [ boldParser
---     , italicParser
---     , underlinedParser
---     ]
+        "b" ->
+            DecoratedNode bold [ decoratedNode ]
+
+        "u" ->
+            DecoratedNode underlined [ decoratedNode ]
+
+        _ ->
+            decoratedNode
 
 
-boldParser : Parser DecoratedText
-boldParser =
-    succeed (\s -> { bold = True, italic = False, underlined = False, content = s })
-        |. symbol "<b>"
-        |= (chompUntilEndOr "</b>" |> getChompedString)
+decorationParser : Parser DecoratedNode
+decorationParser =
+    oneOf
+        [ tagParser
+            |> Parser.andThen
+                (\tag ->
+                    succeed (\content -> processNode tag content)
+                        |= Parser.lazy (\_ -> decorationParser)
+                        |. symbol (closingTag tag)
+                )
+        , succeed PlainText
+            |= (oneOf [ chompUntil "<", chompUntil "\n", end ] |> getChompedString)
+        ]
+
+
+contentParserHelp : List DecoratedNode -> Parser (Parser.Step (List DecoratedNode) (List DecoratedNode))
+contentParserHelp lst =
+    oneOf
+        [ succeed (Parser.Done (List.reverse lst))
+            |. symbol "\n\n"
+        , succeed (Parser.Loop (Newline :: lst))
+            |. symbol "\n"
+        , succeed (\d -> Parser.Loop (d :: lst))
+            |= decorationParser
+        ]
+
+
+contentParser : Parser (List DecoratedNode)
+contentParser =
+    Parser.loop [] contentParserHelp
 
 
 subtitleRecordParser : Parser SubtitleRecord
@@ -354,7 +339,7 @@ subtitleRecordParser =
         |. symbol "\n"
         |= timespanParser
         |. symbol "\n"
-        |= subtitleTextParser
+        |= contentParser
 
 
 srtParser : Parser Srt
@@ -367,8 +352,6 @@ srtHelp revRecordsSoFar =
     oneOf
         [ succeed (\r -> Parser.Loop (r :: revRecordsSoFar))
             |= subtitleRecordParser
-
-        -- |. oneOf [ symbol "\n\n", end ]
         , succeed ()
             |. end
             |> Parser.map (\_ -> Parser.Done (Srt (List.reverse revRecordsSoFar)))
@@ -441,6 +424,8 @@ formatErrorHelp src deadEnd =
                 if modBy 10 i == 0 then
                     String.fromInt i
                         |> String.toList
+                        |> List.append [ '|' ]
+                        |> listAppendPiped [ '|' ]
                         |> listAppendPiped [ c ]
 
                 else
@@ -464,7 +449,7 @@ srtToStringHelp : SubtitleRecord -> String
 srtToStringHelp record =
     [ record.index |> String.fromInt
     , record.timespan |> timespanToSrtString
-    , record.content |> srtContentToString
+    , record.content |> decoratedNodesToString
     ]
         |> String.join "\n"
 
@@ -474,15 +459,6 @@ timespanToSrtString { from, to } =
     timestampToString from ++ " --> " ++ timestampToString to
 
 
-decoratedTextToString : DecoratedText -> String
-decoratedTextToString ({ content } as decoration) =
-    wrapWithTag decoration.bold "b" content
-        |> wrapWithTag decoration.italic "i"
-        |> wrapWithTag decoration.underlined "u"
-
-
-srtContentToString : List DecoratedText -> String
+srtContentToString : List DecoratedNode -> String
 srtContentToString =
-    List.map decoratedTextToString
-        >> List.intersperse "\n"
-        >> String.concat
+    decoratedNodesToString
